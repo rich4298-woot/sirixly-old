@@ -1,0 +1,32 @@
+description = 'Sirix CLI.'
+
+apply plugin: 'kotlin'
+
+test {
+    useJUnitPlatform()
+}
+
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
+    kotlinOptions {
+        // TODO: Upgrade to Java 17 when Kotlin compatibility is available
+        jvmTarget = "16"
+        freeCompilerArgs += ["-Xopt-in=kotlin.RequiresOptIn"]
+    }
+}
+
+dependencies {
+    implementation project(':sirix-core')
+    implementation project(':sirix-xquery')
+
+    implementation implLibraries.kotlinStdlib
+    implementation implLibraries.kotlinStdlibJdk8
+    implementation implLibraries.kotlinxCli
+
+    testImplementation testLibraries.junitJupiterApi
+    testImplementation testLibraries.junitJupiterEngine
+    testImplementation testLibraries.junitVintageEngine
+    testImplementation testLibraries.junitJupiterApi
+    testImplementation testLibraries.junitJupiterParams
+    testImplementation testLibraries.jsonassert
+}

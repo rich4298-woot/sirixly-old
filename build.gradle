@@ -1,0 +1,276 @@
+buildscript {
+    ext.kotlin_version = '1.5.31'
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath "gradle.plugin.org.kt3k.gradle.plugin:coveralls-gradle-plugin:2.12.0"
+        classpath 'net.researchgate:gradle-release:3.0.2'
+        classpath "com.github.ben-manes:gradle-versions-plugin:0.42.0"
+        classpath "gradle.plugin.com.github.jengelman.gradle.plugins:shadow:7.0.0"
+        classpath "com.diffplug.spotless:spotless-plugin-gradle:6.11.0"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+plugins {
+    id "org.sonarqube" version "3.4.0.2513"
+    id "me.champeau.jmh" version "0.6.8"
+}
+
+sonarqube {
+    properties {
+        property "sonar.projectKey", "sirixdb_sirix"
+        property "sonar.organization", "sirixdb"
+        property "sonar.host.url", "https://sonarcloud.io"
+    }
+}
+
+apply from: "${rootDir}/libraries.gradle"
+
+apply plugin: 'net.researchgate.release'
+
+release {
+    failOnSnapshotDependencies = false
+    tagTemplate = 'sirix-$version'
+    buildTasks = ['releaseBuild']
+}
+
+task releaseBuild {
+    project.afterEvaluate {
+        dependsOn project.getTasksByName('build', true)
+    }
+}
+
+task uploadPublications {
+    project.afterEvaluate {
+        dependsOn project.getTasksByName('publishAllPublicationsToMavenRepository', true)
+    }
+}
+
+task travisReleaseSnapshot {
+    if ("${version}".endsWith('SNAPSHOT')) {
+        dependsOn uploadPublications
+    }
+}
+
+afterReleaseBuild.dependsOn(uploadPublications)
+
+allprojects {
+    group = 'io.sirix'
+
+//    apply plugin: 'jacoco'
+    apply plugin: 'com.github.kt3k.coveralls'
+    apply plugin: 'idea'
+
+    repositories {
+        mavenCentral()
+        maven {
+            url = "https://oss.sonatype.org/content/repositories/snapshots/"
+        }
+        maven {
+            url "https://kotlin.bintray.com/kotlinx"
+        }
+        mavenLocal()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+    apply plugin: 'signing'
+    apply plugin: 'com.github.ben-manes.versions'
+    apply plugin: "com.github.johnrengelman.shadow"
+    apply plugin: "com.diffplug.spotless"
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_19
+        targetCompatibility = JavaVersion.VERSION_19
+        withSourcesJar()
+        withJavadocJar()
+
+        if (JavaVersion.current() != targetCompatibility) {
+            throw new GradleException("This build must be run with Java " + targetCompatibility.toString())
+        }
+    }
+
+    javadoc {
+        failOnError = false
+        options {
+            addStringOption('-release', '19')
+            addBooleanOption('-enable-preview', true)
+        }
+    }
+
+    compileJava {
+        options.compilerArgs += ["--enable-preview",
+                                 "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+                                 "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                                 "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED",
+                                 "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+                                 "--add-exports=java.base/java.lang.reflect=ALL-UNNAMED"]
+    }
+
+    compileTestJava {
+        options.compilerArgs += ["--enable-preview",
+                                 "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+                                 "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                                 "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED",
+                                 "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+                                 "--add-exports=java.base/java.lang.reflect=ALL-UNNAMED"]
+    }
+
+    spotless {
+        enforceCheck false
+        java {
+            licenseHeaderFile "${rootDir}/LICENSE"
+        }
+    }
+
+//    jacoco {
+//        toolVersion = "0.8.7"
+//    }
+//
+//    jacocoTestReport {
+//        reports {
+//            xml.enabled = true
+//            html.enabled = true
+//        }
+//    }
+
+    publishing {
+        publications {
+            maven(MavenPublication) {
+                afterEvaluate {
+                    pom {
+                        name = "${project.name}"
+                        description = "${project.description}"
+                        url = "https://sirix.io"
+                        licenses {
+                            license {
+                                name = "New BSD"
+                                url = "http://www.opensource.org/licenses/bsd-license.php"
+                                comments = "3-clause BSD License"
+                            }
+                        }
+                        scm {
+                            connection = "scm:git:git@github.com:sirixdb/sirix.git"
+                            developerConnection = "scm:git:git@github.com:sirixdb/sirix.git"
+                            url = "https://github.com/sirixdb/sirix"
+                        }
+                        issueManagement {
+                            url = "https://github.com/sirixdb/sirix/issues"
+                            system = "GitHub Issues"
+                        }
+                        ciManagement {
+                            system = "Travis CI"
+                            url = "http://travis-ci.org/#!/sirixdb/sirix"
+                        }
+                        developers {
+                            developer {
+                                id = "johanneslichtenberger"
+                                name = "Johannes Lichtenberger"
+                                email = "johannes.lichtenberger@sirix.io"
+                            }
+                        }
+                    }
+                    from components.java
+                }
+            }
+        }
+        repositories {
+            maven {
+                credentials {
+                    username System.getenv("SONATYPE_NEXUS_USERNAME")
+                    password System.getenv("SONATYPE_NEXUS_PASSWORD")
+                }
+                def releasesRepoUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
+                def snapshotsRepoUrl = "https://oss.sonatype.org/content/repositories/snapshots/"
+                url = rootProject.getProperties().version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+            }
+        }
+    }
+
+    ext.isReleaseVersion = !rootProject.getProperties().version.endsWith('SNAPSHOT')
+
+    tasks.withType(Sign) {
+        onlyIf { isReleaseVersion }
+    }
+
+    signing {
+        required { isReleaseVersion }
+        sign publishing.publications.maven
+    }
+
+    configurations {
+        testArtifacts.extendsFrom testImplementation
+    }
+
+    task testsJar(type: Jar) {
+        archiveClassifier = 'tests'
+        from(sourceSets.test.output)
+    }
+
+    artifacts {
+        testArtifacts testsJar
+    }
+
+    jar {
+        into("META-INF/maven/io.sirix/$project.name") {
+            from { generatePomFileForMavenPublication }
+            rename ".*", "pom.xml"
+        }
+    }
+
+    publishing.publications.maven.artifact(testsJar)
+
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+
+    test {
+        testLogging {
+            events "failed"
+            exceptionFormat "short"
+        }
+        useTestNG()
+        useJUnit()
+        jvmArgs(["--enable-preview",
+                 "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+                 "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                 "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED",
+                 "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+                 "--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED",
+                 "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                 "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                 "--add-opens=java.base/java.io=ALL-UNNAMED",
+                 "--add-opens=java.base/java.util=ALL-UNNAMED",
+                 "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+        ])
+
+        minHeapSize = '2g'
+        maxHeapSize = '7g'
+    }
+}
+
+//task jacocoRootReport(type: JacocoReport) {
+//    description = 'Generates an aggregate report from all subprojects'
+//    dependsOn = subprojects.test
+//    sourceDirectories.setFrom files(subprojects.sourceSets.main.allSource.srcDirs)
+//    classDirectories.setFrom files(subprojects.sourceSets.main.output)
+//    executionData.setFrom files(subprojects.jacocoTestReport.executionData).filter {
+//        file -> file.exists()
+//    }.asList()
+//    reports {
+//        html.enabled = true
+//        xml.enabled = true
+//    }
+//}
+//
+//coveralls {
+//    sourceDirs = subprojects.sourceSets.main.allSource.srcDirs.flatten()
+//    jacocoReportPath = "${buildDir}/reports/jacoco/jacocoRootReport/jacocoRootReport.xml"
+//}
